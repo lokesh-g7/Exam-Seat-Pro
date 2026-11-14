@@ -144,9 +144,46 @@ if (typeof window !== 'undefined' && !window.__examseat_fetch_intercepted__) {
   };
 }
 
+// ─── Enrolled Student Database Verification ──────────────────────────────────
+export function getEnrolledStudent(regNo) {
+  if (!regNo) return null;
+  const clean = String(regNo).trim().toUpperCase();
+
+  // 1. Check admin state students (uploaded via Excel / PDF / OCR / manual)
+  try {
+    const adminStorage = JSON.parse(localStorage.getItem('examseat_pro_admin_state') || '{}');
+    const students = adminStorage.students || [];
+    const match = students.find(s => (s.regNo || '').trim().toUpperCase() === clean);
+    if (match) {
+      return {
+        regNo: match.regNo || clean,
+        name: match.name || '',
+        dept: match.dept || match.department || '',
+        year: match.year || match.examYear || 1
+      };
+    }
+  } catch {}
+
+  // 2. Check published allocations (if allocations were synced)
+  try {
+    const published = JSON.parse(localStorage.getItem('examseat_published_allocations') || '[]');
+    const match = published.find(s => (s.regNo || '').trim().toUpperCase() === clean);
+    if (match) {
+      return {
+        regNo: match.regNo || clean,
+        name: match.studentName || match.name || '',
+        dept: match.dept || '',
+        year: match.year || 1
+      };
+    }
+  } catch {}
+
+  return null;
+}
+
 // ─── Standalone Client Auth Fallback ──────────────────────────────────────────
-// Ensures the app works 100% anywhere on Vercel even if a backend server is not hosted!
-function fallbackClientAuth(username, password) {
+// Strictly enforces authentication and registration verification
+export function fallbackClientAuth(username, password) {
   const cleanUser = String(username || '').trim();
   const cleanPass = String(password || '').trim();
 
@@ -165,54 +202,59 @@ function fallbackClientAuth(username, password) {
         }
       };
     }
-    throw new Error('Invalid credentials');
+    const err = new Error('Invalid admin credentials. Access Denied.');
+    err.code = 'INVALID_ADMIN_CREDENTIALS';
+    throw err;
   }
 
   // 2. Student Authentication
   if (!cleanUser) {
-    throw new Error('Registration number is required');
+    const err = new Error('Registration number is required.');
+    err.code = 'MISSING_REGNO';
+    throw err;
   }
 
   // Check locally registered accounts
+  let registeredUser = null;
   try {
     const registered = JSON.parse(localStorage.getItem('examseat_registered_users') || '[]');
-    const match = registered.find(u => (u.username || u.regNo || '').toLowerCase() === cleanUser.toLowerCase());
-    if (match) {
-      if (match.password && cleanPass && match.password !== cleanPass) {
-        throw new Error('Invalid credentials');
-      }
-      return {
-        token: 'standalone-jwt-student-' + Date.now(),
-        user: { ...match, role: 'student' }
-      };
-    }
+    registeredUser = registered.find(u => (u.username || u.regNo || '').trim().toUpperCase() === cleanUser.toUpperCase());
   } catch {}
 
-  // Check nominal roll in localStorage if available
-  let dept = 'CSBS';
-  let year = 3;
-  let name = cleanUser;
-  try {
-    const adminStorage = JSON.parse(localStorage.getItem('examseat_pro_admin_state') || '{}');
-    const students = adminStorage.students || [];
-    const matchedStudent = students.find(s => (s.regNo || '').trim().toUpperCase() === cleanUser.toUpperCase());
-    if (matchedStudent) {
-      dept = matchedStudent.dept || dept;
-      year = matchedStudent.year || matchedStudent.examYear || year;
-      name = matchedStudent.name || name;
+  // IF NOT REGISTERED -> STRICTLY REJECT (NO AUTOMATIC LOGIN!)
+  if (!registeredUser) {
+    const enrolled = getEnrolledStudent(cleanUser);
+    const err = new Error();
+    if (enrolled && enrolled.name) {
+      err.message = `Student "${enrolled.name}" (${cleanUser}) is enrolled in the official student database, but you have NOT created a portal account yet. Please switch to "Sign Up" to register your account and set your password.`;
+      err.code = 'STUDENT_NOT_REGISTERED';
+      err.enrolledStudent = enrolled;
+      err.regNo = cleanUser;
+    } else {
+      err.message = `Registration number "${cleanUser}" is not registered or enrolled in the system. Fake or unauthorized registration numbers are strictly denied.`;
+      err.code = 'UNAUTHORIZED_STUDENT';
+      err.regNo = cleanUser;
     }
-  } catch {}
+    throw err;
+  }
 
+  // IF REGISTERED -> VERIFY PASSWORD
+  if (registeredUser.password && cleanPass !== registeredUser.password) {
+    const err = new Error(`Incorrect password for ${registeredUser.name || cleanUser}. Please verify your credentials or reset your password.`);
+    err.code = 'INVALID_PASSWORD';
+    err.studentName = registeredUser.name || cleanUser;
+    err.regNo = cleanUser;
+    throw err;
+  }
+
+  // SUCCESSFUL AUTHENTICATION
   return {
     token: 'standalone-jwt-student-' + Date.now(),
     user: {
-      id: Date.now(),
-      username: cleanUser,
-      regNo: cleanUser,
-      name: name,
+      ...registeredUser,
       role: 'student',
-      dept: dept,
-      year: year
+      regNo: registeredUser.regNo || cleanUser,
+      name: registeredUser.name || cleanUser
     }
   };
 }
@@ -233,21 +275,27 @@ export async function login(username, password) {
     const data = await safeParseJson(res);
     if (data) {
       if (!res.ok) {
-        throw new Error(data.error || 'Authentication failed');
+        const err = new Error(data.error || 'Authentication failed');
+        err.code = 'BACKEND_AUTH_ERROR';
+        throw err;
       }
       return data;
     }
   } catch (err) {
-    if (err.message && err.message !== 'Failed to fetch' && !err.message.includes('JSON') && !err.message.includes('NetworkError')) {
+    if (err.code === 'BACKEND_AUTH_ERROR') {
       throw err;
     }
   }
 
-  // Fallback to standalone mode on Vercel
+  // Fallback to strict client auth
   return fallbackClientAuth(cleanUsername, cleanPassword);
 }
 
 export async function register(userData) {
+  const cleanReg = String(userData.regNo || userData.username || '').trim();
+  const cleanName = String(userData.name || '').trim();
+
+  // Try live backend first if available
   try {
     const res = await fetch(`${API_URL}/auth/register`, {
       method: 'POST',
@@ -258,36 +306,80 @@ export async function register(userData) {
     const data = await safeParseJson(res);
     if (data) {
       if (!res.ok) {
-        throw new Error(data.error || 'Registration failed');
+        const err = new Error(data.error || 'Registration failed');
+        err.code = 'BACKEND_REG_ERROR';
+        throw err;
       }
       return data;
     }
   } catch (err) {
-    if (err.message && err.message !== 'Failed to fetch' && !err.message.includes('JSON')) {
+    if (err.code === 'BACKEND_REG_ERROR') {
       throw err;
     }
   }
 
-  // Standalone mode: save student registration locally
-  try {
-    const registered = JSON.parse(localStorage.getItem('examseat_registered_users') || '[]');
-    const cleanUser = {
-      ...userData,
-      id: Date.now(),
-      role: 'student'
-    };
-    registered.push(cleanUser);
-    localStorage.setItem('examseat_registered_users', JSON.stringify(registered));
-    return {
-      token: 'standalone-jwt-student-' + Date.now(),
-      user: cleanUser
-    };
-  } catch {
-    return {
-      token: 'standalone-jwt-student-' + Date.now(),
-      user: { ...userData, role: 'student', id: Date.now() }
-    };
+  // Standalone Verification:
+  // 1. Check if already registered
+  const registered = JSON.parse(localStorage.getItem('examseat_registered_users') || '[]');
+  const alreadyRegistered = registered.find(u => (u.username || u.regNo || '').trim().toUpperCase() === cleanReg.toUpperCase());
+  if (alreadyRegistered) {
+    const err = new Error(`An account is already registered for ${alreadyRegistered.name || cleanReg} (${cleanReg}). Please switch to Sign In.`);
+    err.code = 'ALREADY_REGISTERED';
+    err.regNo = cleanReg;
+    throw err;
   }
+
+  // 2. Check if student is in the enrolled database
+  const enrolled = getEnrolledStudent(cleanReg);
+  let totalEnrolledCount = 0;
+  try {
+    const adminStorage = JSON.parse(localStorage.getItem('examseat_pro_admin_state') || '{}');
+    totalEnrolledCount = (adminStorage.students || []).length;
+  } catch {}
+
+  if (totalEnrolledCount > 0 && !enrolled) {
+    const err = new Error(`Registration number "${cleanReg}" was not found in the institution's enrolled student database. Fake or unregistered student accounts cannot be created.`);
+    err.code = 'NOT_ENROLLED';
+    err.regNo = cleanReg;
+    throw err;
+  }
+
+  // 3. Name Verification if enrolled in official database
+  if (enrolled && enrolled.name) {
+    const normalize = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const enteredNorm = normalize(cleanName);
+    const officialNorm = normalize(enrolled.name);
+
+    const matches = enteredNorm.includes(officialNorm) || officialNorm.includes(enteredNorm) ||
+                    cleanName.split(' ')[0].toLowerCase() === enrolled.name.split(' ')[0].toLowerCase();
+    if (!matches && enteredNorm !== officialNorm) {
+      const err = new Error(`Identity Verification Failed: Registration number ${cleanReg} officially belongs to "${enrolled.name}" according to college records. You entered "${cleanName}". Please enter the official name.`);
+      err.code = 'NAME_MISMATCH';
+      err.officialName = enrolled.name;
+      err.enteredName = cleanName;
+      err.regNo = cleanReg;
+      throw err;
+    }
+  }
+
+  // Save student registration locally
+  const cleanUser = {
+    ...userData,
+    name: (enrolled && enrolled.name) ? enrolled.name : cleanName,
+    dept: (enrolled && enrolled.dept) ? enrolled.dept : (userData.dept || 'CSBS'),
+    year: (enrolled && enrolled.year) ? enrolled.year : (userData.year || 1),
+    id: Date.now(),
+    role: 'student',
+    regNo: cleanReg
+  };
+
+  registered.push(cleanUser);
+  localStorage.setItem('examseat_registered_users', JSON.stringify(registered));
+
+  return {
+    token: 'standalone-jwt-student-' + Date.now(),
+    user: cleanUser
+  };
 }
 
 export async function validateToken(token) {
