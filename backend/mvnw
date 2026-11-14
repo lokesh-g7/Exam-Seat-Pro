@@ -1,0 +1,86 @@
+#!/bin/sh
+# ----------------------------------------------------------------------------
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#    https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+# ----------------------------------------------------------------------------
+
+set -euf
+[ "${MVNW_VERBOSE-}" != debug ] || set -x
+
+# find the project base dir, i.e. the directory that contains the .mvn directory
+find_maven_basedir() {
+  if [ -z "${1-}" ]; then
+    echo "Path not specified to find_maven_basedir"
+    return 1
+  fi
+  basedir="${1}"
+  wdir="${1}"
+  while [ "${wdir}" != '/' ] && [ ! -d "${wdir}/.mvn" ]; do
+    wdir=$(cd "${wdir}/.." || exit 1; pwd)
+  done
+  if [ -d "${wdir}/.mvn" ]; then
+    basedir="${wdir}"
+  fi
+  echo "${basedir}"
+}
+
+BASE_DIR=$(find_maven_basedir "$(dirname "$0")")
+if [ -z "${BASE_DIR}" ]; then
+  exit 1
+fi
+
+##########################################################################################
+# Extension to allow automatically downloading the maven-wrapper.jar from Maven-central
+##########################################################################################
+wrapperJarPath="${BASE_DIR}/.mvn/wrapper/maven-wrapper.jar"
+
+if [ -r "${BASE_DIR}/.mvn/wrapper/maven-wrapper.properties" ]; then
+  wrapperUrl=$(grep "^wrapperUrl" "${BASE_DIR}/.mvn/wrapper/maven-wrapper.properties" | tr -d '\r' | cut -d= -f2-)
+fi
+
+if [ ! -r "${wrapperJarPath}" ]; then
+  printf "Downloading Maven wrapper jar...\n"
+  if command -v curl >/dev/null; then
+    curl -fsSL -o "${wrapperJarPath}" "${wrapperUrl}"
+  elif command -v wget >/dev/null; then
+    wget -q -O "${wrapperJarPath}" "${wrapperUrl}"
+  else
+    echo "ERROR: no curl or wget found to download maven-wrapper.jar" >&2
+    exit 1
+  fi
+fi
+
+if [ -z "${JAVA_HOME-}" ]; then
+  JAVACMD="$(command -v java)"
+else
+  JAVACMD="${JAVA_HOME}/bin/java"
+fi
+
+if [ ! -x "${JAVACMD}" ]; then
+  echo "ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH." >&2
+  exit 1
+fi
+
+exec "${JAVACMD}" \
+  ${JVM_CONFIG_MAVEN_PROPS:-} \
+  ${MAVEN_OPTS-} \
+  ${MAVEN_DEBUG_OPTS-} \
+  -classpath "${wrapperJarPath}" \
+  "-Dmaven.multiModuleProjectDirectory=${BASE_DIR}" \
+  org.apache.maven.wrapper.MavenWrapperMain \
+  ${MAVEN_CONFIG-} \
+  "$@"

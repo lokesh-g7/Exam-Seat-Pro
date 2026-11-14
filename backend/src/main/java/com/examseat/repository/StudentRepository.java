@@ -1,0 +1,13 @@
+package com.examseat.repository;
+
+import com.examseat.model.Student;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.Optional;
+
+@Repository
+public interface StudentRepository extends JpaRepository<Student, Long> {
+    Optional<Student> findByRegNo(String regNo);
+    Optional<Student> findByRegNoIgnoreCase(String regNo);
+}

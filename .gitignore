@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Production Build
+dist/
+build/
+
+# Backend Build & Output
+backend/target/
+backend/*.db
+backend/*.mv.db
+backend/*.trace.db
+backend/*.log
+backend/target/classes/oracleJdk-26/
+
+# Environment Variables & Secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.pem
+*.key
+*.cert
+
+# Log & Error files
+*.log
+*.err
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Editor & IDE artifacts
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Testing & Scratch Artifacts
+sample_docs/
+scratch/
+
