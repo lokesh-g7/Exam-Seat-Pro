@@ -1,45 +1,40 @@
 import { useState } from 'react';
 import { sanitizeText, sanitizeObject } from '../utils/sanitize';
+import { login as apiLogin, register as apiRegister } from '../utils/api';
 
-const API = '/api/auth';
-
-async function apiLogin(username, password) {
-  const res = await fetch(`${API}/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Login failed');
-  return data;
-}
-
-async function apiRegister(payload) {
-  const res = await fetch(`${API}/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Registration failed');
-  return data;
-}
-
-export default function Auth({ onLogin }) {
-  const [view, setView] = useState('studentLogin');
+export default function Auth({
+  onLogin,
+  initialView = 'studentLogin',
+  initialRegNo = '',
+  errorNotice = '',
+  onNavigate
+}) {
+  const [view, setView] = useState(initialView);
   // 'studentLogin' | 'studentSignup' | 'adminLogin'
 
   const [formData, setFormData] = useState({
     name: '',
-    regNo: '',  // registration number (used as username for students)
+    regNo: initialRegNo || '',  // registration number (used as username for students)
     dept: '',
     year: '',
     password: '',
     confirmPassword: '',
   });
 
-  const [error, setError] = useState('');
+  const [error, setError] = useState(errorNotice || '');
   const [loading, setLoading] = useState(false);
+
+  const switchView = (newView) => {
+    setView(newView);
+    setError('');
+    const targetPath = newView === 'adminLogin' ? '/admin' : '/student/login';
+    if (typeof window !== 'undefined' && window.history) {
+      window.history.pushState({}, '', targetPath);
+    }
+    if (onNavigate) {
+      onNavigate(targetPath);
+    }
+  };
 
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
@@ -50,10 +45,14 @@ export default function Auth({ onLogin }) {
     try {
       const sanitizedUsername = sanitizeText(formData.regNo || 'admin');
       const { token, user } = await apiLogin(sanitizedUsername, formData.password);
+      if (user.role && user.role.toLowerCase() !== 'admin') {
+        setError('Access Denied: This account does not possess admin clearance.');
+        return;
+      }
       localStorage.setItem('examseat_token', token);
-      onLogin({ ...user, token, role: 'admin' });
+      onLogin({ ...user, token, role: 'admin' }, '/admin');
     } catch (err) {
-      setError(err.message || 'Invalid credentials');
+      setError(err.message || 'Invalid admin credentials');
     } finally {
       setLoading(false);
     }
@@ -68,18 +67,20 @@ export default function Auth({ onLogin }) {
     }
     setLoading(true);
     try {
+      const sanitizedReg = sanitizeText(formData.regNo).trim();
       const sanitizedPayload = {
-        username: sanitizeText(formData.regNo),
+        username: sanitizedReg,
         password: formData.password,
         name: sanitizeText(formData.name),
         dept: sanitizeText(formData.dept),
         year: formData.year ? parseInt(formData.year) : 1,
-        regNo: sanitizeText(formData.regNo),
+        regNo: sanitizedReg,
         role: 'student',
       };
       const { token, user } = await apiRegister(sanitizedPayload);
       localStorage.setItem('examseat_token', token);
-      onLogin({ ...user, token, role: 'student' });
+      const studentReg = sanitizedPayload.regNo || user.regNo || sanitizedReg;
+      onLogin({ ...user, token, role: 'student', regNo: studentReg }, `/student/reg=${encodeURIComponent(studentReg)}`);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -92,16 +93,17 @@ export default function Auth({ onLogin }) {
     setError('');
     setLoading(true);
     try {
-      const sanitizedRegNo = sanitizeText(formData.regNo);
+      const sanitizedRegNo = sanitizeText(formData.regNo).trim();
       const { token, user } = await apiLogin(sanitizedRegNo, formData.password);
-      if (user.role !== 'student') {
-        setError('This account is not a student account. Use Admin Login.');
+      if (user.role && user.role.toLowerCase() === 'admin') {
+        setError('This is an administrator account. Please use Admin Gateway at /admin.');
         return;
       }
       localStorage.setItem('examseat_token', token);
-      onLogin({ ...user, token, role: 'student' });
+      const studentReg = user.regNo || sanitizedRegNo;
+      onLogin({ ...user, token, role: 'student', regNo: studentReg }, `/student/reg=${encodeURIComponent(studentReg)}`);
     } catch (err) {
-      setError(err.message);
+      setError(err.message || 'Invalid student credentials');
     } finally {
       setLoading(false);
     }
@@ -245,7 +247,7 @@ export default function Auth({ onLogin }) {
         {/* View Switcher */}
         <div className={`mt-6 pt-6 border-t ${isDark ? 'border-white/10' : 'border-slate-200/50'} text-center text-sm`}>
           {view === 'adminLogin' ? (
-            <button onClick={() => { setView('studentLogin'); setError(''); }} className="text-primary-400 hover:text-primary-300 transition-colors">
+            <button type="button" onClick={() => switchView('studentLogin')} className="text-primary-400 hover:text-primary-300 transition-colors">
               I'm a student
             </button>
           ) : (
@@ -255,15 +257,19 @@ export default function Auth({ onLogin }) {
                   {view === 'studentLogin' ? "Don't have an account? " : "Already registered? "}
                 </span>
                 <button
-                  onClick={() => { setView(view === 'studentLogin' ? 'studentSignup' : 'studentLogin'); setError(''); }}
+                  type="button"
+                  onClick={() => switchView(view === 'studentLogin' ? 'studentSignup' : 'studentLogin')}
                   className="text-orange-500 font-semibold hover:text-orange-600 transition-colors"
                 >
                   {view === 'studentLogin' ? 'Sign Up' : 'Sign In'}
                 </button>
               </div>
               <div>
-                <button onClick={() => { setView('adminLogin'); setError(''); }}
-                  className="text-slate-400 hover:text-slate-600 font-semibold transition-colors mt-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => switchView('adminLogin')}
+                  className="text-slate-400 hover:text-slate-600 font-semibold transition-colors mt-2 text-xs"
+                >
                   Admin login
                 </button>
               </div>

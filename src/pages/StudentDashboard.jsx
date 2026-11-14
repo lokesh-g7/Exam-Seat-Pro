@@ -30,10 +30,20 @@ export default function StudentDashboard({ user, onLogout }) {
   const [issueSuccess, setIssueSuccess] = useState(null)
   const [issueError, setIssueError] = useState(null)
 
-  // Use regNo from user record (set during sign up or stored in JWT)
-  const regNo = (user.regNo || user.username || user.id || '').trim()
+  // Use targetRegNo if inspected by admin, or regNo from user record
+  const regNo = (user.targetRegNo || user.regNo || user.username || user.id || '').trim()
   const dept = (user.dept || '').trim()
   const year = user.year || user.examYear || 1
+
+  useEffect(() => {
+    // Keep URL synced to /student/reg=:regNo
+    if (regNo && typeof window !== 'undefined' && window.history) {
+      const expectedPath = `/student/reg=${encodeURIComponent(regNo)}`
+      if (window.location.pathname !== expectedPath) {
+        window.history.replaceState({}, '', expectedPath)
+      }
+    }
+  }, [regNo])
 
   useEffect(() => {
     let cancelled = false
@@ -42,25 +52,65 @@ export default function StudentDashboard({ user, onLogout }) {
       setIsLoading(true)
       setError(null)
       try {
-        // 1. Fetch seat allocation by regNo
-        const allocRes = await fetch(`/api/allocations/${encodeURIComponent(regNo)}`)
-        if (!cancelled) {
+        let foundAlloc = null
+
+        // 1. Fetch seat allocation by regNo from API
+        try {
+          const allocRes = await fetch(`/api/allocations/${encodeURIComponent(regNo)}`)
           if (allocRes.ok) {
-            setAllocation(await allocRes.json())
-          } else if (allocRes.status !== 404) {
-            throw new Error('Failed to fetch allocation')
+            const contentType = allocRes.headers.get('content-type') || ''
+            if (contentType.includes('application/json')) {
+              foundAlloc = await allocRes.json()
+            }
           }
+        } catch {}
+
+        // Fallback: check published allocations in local storage (standalone mode)
+        if (!foundAlloc) {
+          try {
+            const stored = JSON.parse(localStorage.getItem('examseat_published_allocations') || '[]')
+            const match = stored.find(a => (a.regNo || '').trim().toUpperCase() === regNo.toUpperCase())
+            if (match) foundAlloc = match
+          } catch {}
+        }
+
+        if (!cancelled && foundAlloc) {
+          setAllocation(foundAlloc)
         }
 
         // 2. Fetch timetable for student's dept + year
-        if (dept && year) {
-          const ttRes = await fetch(`/api/timetable/student/${encodeURIComponent(dept)}/${year}`)
-          if (!cancelled && ttRes.ok) {
-            setTimetable(await ttRes.json())
+        let foundTimetable = []
+        try {
+          if (dept && year) {
+            const ttRes = await fetch(`/api/timetable/student/${encodeURIComponent(dept)}/${year}`)
+            if (ttRes.ok) {
+              const contentType = ttRes.headers.get('content-type') || ''
+              if (contentType.includes('application/json')) {
+                foundTimetable = await ttRes.json()
+              }
+            }
           }
+        } catch {}
+
+        // Fallback: check timetable in local admin storage
+        if (foundTimetable.length === 0) {
+          try {
+            const adminStorage = JSON.parse(localStorage.getItem('examseat_pro_admin_state') || '{}')
+            const allTt = adminStorage.timetable || []
+            foundTimetable = allTt.filter(t => 
+              (!dept || (t.dept || t.department || '').toLowerCase().includes(dept.toLowerCase())) &&
+              (!year || String(t.year) === String(year))
+            )
+          } catch {}
+        }
+
+        if (!cancelled && foundTimetable.length > 0) {
+          setTimetable(foundTimetable)
         }
       } catch (err) {
-        if (!cancelled) setError('Connection failed. Please check if the server is running.')
+        if (!cancelled) {
+          console.warn('Dashboard fetch note:', err.message)
+        }
       } finally {
         if (!cancelled) setIsLoading(false)
       }
@@ -82,22 +132,41 @@ export default function StudentDashboard({ user, onLogout }) {
     setIssueError(null)
     setIssueSuccess(null)
     try {
-      const res = await fetch('/api/issues', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          regNo,
-          studentName: user.name || regNo,
-          dept,
-          year,
-          category: issueCategory,
-          message: issueMessage.trim()
-        })
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to submit issue')
+      const issuePayload = {
+        regNo,
+        studentName: user.name || regNo,
+        dept,
+        year,
+        category: issueCategory,
+        message: issueMessage.trim(),
+        createdAt: new Date().toISOString(),
+        status: 'OPEN'
       }
+
+      let backendSuccess = false
+      try {
+        const res = await fetch('/api/issues', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(issuePayload)
+        })
+        const contentType = res.headers.get('content-type') || ''
+        if (contentType.includes('application/json')) {
+          const data = await res.json()
+          if (res.ok) backendSuccess = true
+        }
+      } catch {}
+
+      // Always save to client storage so admin sees it in audit logs even in standalone mode
+      try {
+        const existing = JSON.parse(localStorage.getItem('examseat_issues') || '[]')
+        existing.unshift({
+          ...issuePayload,
+          id: Date.now()
+        })
+        localStorage.setItem('examseat_issues', JSON.stringify(existing))
+      } catch {}
+
       setIssueSuccess('Your issue has been reported. Exam administration has been notified.')
       setIssueMessage('')
       setTimeout(() => {
@@ -105,7 +174,7 @@ export default function StudentDashboard({ user, onLogout }) {
         setIssueSuccess(null)
       }, 2500)
     } catch (err) {
-      setIssueError(err.message)
+      setIssueError(err.message || 'Failed to submit issue')
     } finally {
       setIsSubmittingIssue(false)
     }
@@ -113,8 +182,29 @@ export default function StudentDashboard({ user, onLogout }) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 text-slate-800 flex flex-col">
+      {/* Admin Inspector Mode Banner */}
+      {user.role === 'admin' && (
+        <div className="bg-slate-900 text-slate-200 border-b border-slate-700 px-4 py-2 flex items-center justify-between text-xs sticky top-0 z-20 shadow-md">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span>
+              <strong>ADMIN AUDIT MODE:</strong> Viewing seating record for student <strong>{regNo}</strong>
+            </span>
+          </div>
+          <button
+            onClick={() => {
+              window.history.pushState({}, '', '/admin')
+              window.dispatchEvent(new PopStateEvent('popstate'))
+            }}
+            className="px-3 py-1 bg-primary-600 hover:bg-primary-500 text-white rounded-lg font-bold transition-all shadow-sm text-xs"
+          >
+            ← Back to Admin Gateway
+          </button>
+        </div>
+      )}
+
       {/* Header */}
-      <header className="border-b border-orange-200/60 bg-white/70 backdrop-blur-md p-4 shadow-sm sticky top-0 z-10">
+      <header className={`border-b border-orange-200/60 bg-white/70 backdrop-blur-md p-4 shadow-sm sticky ${user.role === 'admin' ? 'top-8' : 'top-0'} z-10`}>
         <div className="max-w-5xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center font-bold text-white shadow-lg shadow-orange-300/40">

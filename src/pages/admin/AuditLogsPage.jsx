@@ -29,15 +29,25 @@ export default function AuditLogsPage() {
     async function fetchIssues() {
       try {
         const res = await fetch('/api/issues')
-        if (res.ok) {
+        const contentType = res.headers ? res.headers.get('content-type') || '' : ''
+        if (res.ok && contentType.includes('application/json')) {
           const data = await res.json()
-          setIssues(data)
+          if (Array.isArray(data)) {
+            setIssues(data)
+            return
+          }
         }
       } catch (err) {
-        console.error("Failed to fetch student issues:", err)
+        console.warn("Failed to fetch student issues from backend:", err.message)
       } finally {
         setIsLoadingIssues(false)
       }
+
+      // Fallback: load locally stored issues if backend is offline/cloud-only
+      try {
+        const localIssues = JSON.parse(localStorage.getItem('examseat_issues') || '[]')
+        setIssues(localIssues)
+      } catch {}
     }
 
     fetchLogs()
@@ -52,13 +62,24 @@ export default function AuditLogsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus })
       })
-      if (res.ok) {
+      const contentType = res.headers ? res.headers.get('content-type') || '' : ''
+      if (res.ok && contentType.includes('application/json')) {
         const updated = await res.json()
         setIssues(prev => prev.map(i => i.id === issueId ? updated : i))
+        return
       }
     } catch (err) {
-      console.error("Failed to update issue status:", err)
+      console.warn("Backend issue update note:", err.message)
     }
+
+    // Local toggle fallback
+    setIssues(prev => {
+      const updated = prev.map(i => i.id === issueId ? { ...i, status: newStatus } : i)
+      try {
+        localStorage.setItem('examseat_issues', JSON.stringify(updated))
+      } catch {}
+      return updated
+    })
   }
 
   const filteredLogs = logs.filter(log =>

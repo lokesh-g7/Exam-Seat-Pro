@@ -67,7 +67,7 @@ public class SecurityConfig {
                 .xssProtection(xss -> xss.headerValue(XXssProtectionHeaderWriter.HeaderValue.ENABLED_MODE_BLOCK))
                 .contentTypeOptions(Customizer.withDefaults())
                 .contentSecurityPolicy(csp -> csp.policyDirectives(
-                    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' http://localhost:* http://127.0.0.1:*;"
+                    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' http://localhost:* http://127.0.0.1:* https://*.vercel.app https://exam-seat-pro-new.vercel.app https:;"
                 ))
             )
             // Route Authorization Controls
@@ -108,7 +108,28 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(Arrays.asList("http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"));
+        
+        // Dynamic origin support for localhost and deployed cloud domains (e.g. Vercel)
+        String envOrigins = System.getenv("CORS_ALLOWED_ORIGINS");
+        java.util.List<String> origins = new java.util.ArrayList<>(Arrays.asList(
+            "http://localhost:5173",
+            "http://localhost:3000",
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:3000",
+            "https://exam-seat-pro-new.vercel.app"
+        ));
+        if (envOrigins != null && !envOrigins.isBlank()) {
+            for (String o : envOrigins.split(",")) {
+                if (!o.isBlank()) origins.add(o.trim());
+            }
+        }
+        configuration.setAllowedOriginPatterns(Arrays.asList(
+            "http://localhost:*",
+            "http://127.0.0.1:*",
+            "https://*.vercel.app",
+            "https://exam-seat-pro-new.vercel.app"
+        ));
+        configuration.setAllowedOrigins(origins);
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
         configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"));
         configuration.setExposedHeaders(Arrays.asList("Authorization", "Retry-After"));

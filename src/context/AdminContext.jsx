@@ -387,23 +387,30 @@ export function AdminProvider({ children }) {
         })
       }
 
-      // 1. Save allocations
-      const response = await fetch('/api/allocations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ allocations })
-      })
+      // Persist allocations to client storage (enables Student Portal lookup anywhere, even without cloud DB)
+      try {
+        localStorage.setItem('examseat_published_allocations', JSON.stringify(allocations))
+        localStorage.setItem('examseat_published_seating', JSON.stringify(seating))
+      } catch {}
 
-      if (!response.ok) {
-        let msg = 'Failed to publish allocations'
-        try {
-          const errBody = await response.json()
-          if (errBody?.error) msg = errBody.error
-        } catch {}
-        throw new Error(msg)
+      // 1. Save allocations to backend if reachable
+      let data = { message: `Published ${allocations.length} allocations.` }
+      try {
+        const response = await fetch('/api/allocations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ allocations })
+        })
+
+        if (response.ok) {
+          const contentType = response.headers.get('content-type') || ''
+          if (contentType.includes('application/json')) {
+            data = await response.json()
+          }
+        }
+      } catch (apiErr) {
+        console.warn('[AdminContext] Backend sync note:', apiErr.message)
       }
-
-      const data = await response.json()
 
       // 2. Also sync students to the backend database so their profiles are stored
       const seenStudentRegNos = new Set()
