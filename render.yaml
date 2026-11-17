@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: examseat-backend
+    runtime: docker
+    dockerfilePath: backend/Dockerfile
+    dockerContext: backend
+    plan: free
+    region: singapore
+    envVars:
+      - key: DB_URL
+        value: jdbc:h2:file:./examseat.db
+      - key: CORS_ALLOWED_ORIGINS
+        value: https://exam-seat-pro-new.vercel.app,http://localhost:3000,http://localhost:5173
