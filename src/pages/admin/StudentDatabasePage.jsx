@@ -495,11 +495,12 @@ export default function StudentDatabasePage() {
         method: 'POST',
         body: formData,
       })
-      const data = await res.json()
-      if (!res.ok) {
-        setError(data.error || 'OCR extraction failed')
+      const contentType = res.headers.get('content-type') || ''
+      if (!res.ok || !contentType.includes('application/json')) {
+        setError('📡 OCR PDF extraction requires the Spring Boot backend running on port 8080. On Vercel, please use CSV import or Manual Entry instead.')
         return
       }
+      const data = await res.json()
       if (!data.students || data.students.length === 0) {
         setError('No student records could be extracted from this PDF. Please check the file and try again, or use CSV upload.')
         return
@@ -554,8 +555,12 @@ export default function StudentDatabasePage() {
       const formData = new FormData()
       formData.append('file', file)
       const res = await fetch('/api/students/extract-pdf', { method: 'POST', body: formData })
+      const contentType2 = res.headers.get('content-type') || ''
+      if (!res.ok || !contentType2.includes('application/json')) {
+        setError('📡 OCR PDF extraction requires the Spring Boot backend running on port 8080. On Vercel, please use CSV import instead.')
+        return
+      }
       const data = await res.json()
-      if (!res.ok) { setError(data.error || 'OCR extraction failed'); return }
       if (!data.students || data.students.length === 0) { setError('No records extracted.'); return }
       setExtractedData(data)
       setShowReviewPanel(true)
@@ -585,6 +590,11 @@ export default function StudentDatabasePage() {
         method: 'POST',
         body: formData,
       })
+      const contentType3 = res.headers.get('content-type') || ''
+      if (!res.ok || !contentType3.includes('application/json')) {
+        setTimetableOcrError('📡 OCR Timetable extraction requires the Spring Boot backend running on port 8080. On Vercel, please use Manual Entry to add timetable rows directly.')
+        return
+      }
       const data = await res.json()
       if (!res.ok) {
         setTimetableOcrError(data.message || data.error || 'Failed to extract timetable via OCR')

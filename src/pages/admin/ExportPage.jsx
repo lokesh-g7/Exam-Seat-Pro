@@ -57,7 +57,7 @@ function isValidGridArray(arr) {
 }
 
 export default function ExportPage() {
-  const { students, config: adminConfig, seating: localSeating, publishAllocations, isPublishing, publishResult, nextStep } = useAdmin()
+  const { students, timetable, config: adminConfig, seating: localSeating, publishAllocations, isPublishing, publishResult, nextStep } = useAdmin()
   const [isExporting, setIsExporting] = useState(false)
   const [exportType, setExportType] = useState(null) // 'excel' | 'pdf'
   const [exported, setExported] = useState(false)

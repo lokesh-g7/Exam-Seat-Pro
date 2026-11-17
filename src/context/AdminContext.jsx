@@ -251,21 +251,31 @@ export function AdminProvider({ children }) {
       body: formData
     })
     
-    if (!response.ok) throw new Error('Failed to parse PDF')
+    const contentType = response.headers.get('content-type') || ''
+    if (!response.ok || !contentType.includes('application/json')) {
+      throw new Error('OCR extraction requires backend running on port 8080. On Vercel, please use manual entry.')
+    }
     return response.json()
   }, [])
 
   const saveParsedTimetable = useCallback(async (entries) => {
-    const response = await fetch('/api/timetable/save-all', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(entries)
-    })
-    
-    if (!response.ok) throw new Error('Failed to save timetable')
-    const saved = await response.json()
-    setTimetable(prev => [...prev, ...saved])
-    return saved
+    try {
+      const response = await fetch('/api/timetable/save-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(entries)
+      })
+      const contentType = response.headers.get('content-type') || ''
+      if (response.ok && contentType.includes('application/json')) {
+        const saved = await response.json()
+        setTimetable(prev => [...prev, ...saved])
+        return saved
+      }
+    } catch {
+      // offline fallback: save directly to local state
+    }
+    setTimetable(prev => [...prev, ...entries])
+    return entries
   }, [])
 
   const updateConfig = useCallback((updates) => {
