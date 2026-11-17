@@ -385,7 +385,7 @@ export default function AllocationPage() {
               <p className="text-2xl font-bold">
                 {activeSession && sessionStudents.length > 0 
                   ? sessionStudents.length 
-                  : seating.flatMap(g => g.flat()).filter(Boolean).length || students.length}
+                  : seating.flatMap(g => (typeof g.flat === 'function' ? g.flat() : [].concat(...g))).filter(Boolean).length || students.length}
               </p>
             </div>
             <div className="bg-white/5 border border-white/10 rounded-xl p-4">
@@ -603,7 +603,7 @@ export default function AllocationPage() {
                       <span className="text-xl">🏛️</span>
                       <span className="font-bold">Hall {idx + 1}</span>
                       <span className="text-white/40 text-sm">
-                        {grid.flat().filter(Boolean).length} students
+                        {(typeof grid.flat === 'function' ? grid.flat() : [].concat(...grid)).filter(Boolean).length} students
                       </span>
                     </div>
                     {calculateConflicts(grid, config.mode).length > 0 && (

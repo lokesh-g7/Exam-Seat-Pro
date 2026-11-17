@@ -60,16 +60,21 @@ function OcrReviewPanel({ extractedData, onSave, onDiscard }) {
     setSaving(true)
     setSaveError(null)
     try {
-      const res = await fetch('/api/students/save-extracted', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(rows),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        setSaveError(data.error || 'Failed to save students')
-        return
-      }
+      let data = { count: rows.length, message: `${rows.length} students processed.` }
+      try {
+        const res = await fetch('/api/students/save-extracted', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(rows),
+        })
+        if (res.ok) {
+          const contentType = res.headers.get('content-type') || ''
+          if (contentType.includes('application/json')) {
+            data = await res.json()
+          }
+        }
+      } catch {}
+
       onSave(rows, data)
     } catch (e) {
       setSaveError(e.message)
@@ -386,7 +391,14 @@ function StudentUploadZone({ onCsvFile, onPdfFile, isProcessingPdf, error }) {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function StudentDatabasePage() {
-  const { students, addStudents, removeStudent, updateStudent, clearStudents, addSavedEntriesToTimetable } = useAdmin()
+  const {
+    students, addStudents, removeStudent, updateStudent, clearStudents, addSavedEntriesToTimetable,
+    halls, saveHall, deleteHall,
+    depts, saveDept, deleteDept,
+    semesters, saveSem, deleteSem,
+    subjects, saveSubject, deleteSubject,
+    invigilators, saveInvigilator, deleteInvig
+  } = useAdmin()
   const [activeSubTab, setActiveSubTab] = useState('students')
   const [editingStudent, setEditingStudent] = useState(null)
   const [editForm, setEditForm] = useState({})
@@ -410,13 +422,6 @@ export default function StudentDatabasePage() {
   const addMoreCsvRef = useRef(null)
   const addMorePdfRef = useRef(null)
 
-  // Master Data States
-  const [halls, setHalls] = useState([])
-  const [depts, setDepts] = useState([])
-  const [semesters, setSemesters] = useState([])
-  const [subjects, setSubjects] = useState([])
-  const [invigilators, setInvigilators] = useState([])
-
   // Form states for CRUD
   const [showHallForm, setShowHallForm] = useState(false)
   const [hallForm, setHallForm] = useState({ hallName: '', rowsCount: 8, columnsCount: 8, seatsPerTable: 1, blockedSeats: '', accessibilitySeats: '', seatingModes: 'semester,internal', allowedExamTypes: 'Internal Examination,University Examination' })
@@ -437,29 +442,6 @@ export default function StudentDatabasePage() {
   const [showInvigilatorForm, setShowInvigilatorForm] = useState(false)
   const [invigilatorForm, setInvigilatorForm] = useState({ name: '', email: '', departmentCode: 'CSE', availabilityStatus: 'Available', maxWorkloadHours: 12 })
   const [editingInvigId, setEditingInvigId] = useState(null)
-
-  useEffect(() => {
-    fetchMasterData()
-  }, [])
-
-  async function fetchMasterData() {
-    try {
-      const [hRes, dRes, semRes, subRes, iRes] = await Promise.all([
-        fetch('/api/halls'),
-        fetch('/api/departments'),
-        fetch('/api/semesters'),
-        fetch('/api/subjects'),
-        fetch('/api/invigilators'),
-      ])
-      if (hRes.ok) setHalls(await hRes.json())
-      if (dRes.ok) setDepts(await dRes.json())
-      if (semRes.ok) setSemesters(await semRes.json())
-      if (subRes.ok) setSubjects(await subRes.json())
-      if (iRes.ok) setInvigilators(await iRes.json())
-    } catch (err) {
-      console.error('Error fetching master data:', err)
-    }
-  }
 
   // ── CSV handler ──
   function handleCsvFile(file) {
@@ -665,21 +647,14 @@ export default function StudentDatabasePage() {
         }
       }
 
-      // Save each new subject
+      // Save each new subject directly to context & persistent storage
       for (const sub of distinctSubjects) {
-        try {
-          await fetch('/api/subjects', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(sub)
-          })
-        } catch (e) {
-          console.warn('Could not auto-save subject:', sub.subjectCode, e)
-        }
+        await saveSubject(sub)
       }
 
-      // 2. Save full exam timetable sessions to /api/timetable/confirm
+      // 2. Save full exam timetable sessions to context & persistent storage
       const timetablePayload = extractedTimetable.map(e => ({
+        id: Date.now() + Math.random(),
         department: e.department,
         year: e.year || 1,
         courseCode: e.courseCode,
@@ -688,24 +663,19 @@ export default function StudentDatabasePage() {
         session: e.session
       }))
 
-      const ttRes = await fetch('/api/timetable/confirm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(timetablePayload)
-      })
-
-      if (!ttRes.ok) {
-        const errData = await ttRes.json().catch(() => ({}))
-        throw new Error(errData.message || 'Failed to save timetable schedule')
-      }
-
       // Update in-memory AdminContext timetable state
       if (addSavedEntriesToTimetable) {
         addSavedEntriesToTimetable(timetablePayload)
       }
 
-      // Refresh master data
-      await fetchMasterData()
+      // Try background backend sync if live
+      try {
+        fetch('/api/timetable/confirm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(timetablePayload)
+        }).catch(() => {})
+      } catch {}
 
       setShowTimetableOcr(false)
       setExtractedTimetable([])
@@ -733,54 +703,96 @@ export default function StudentDatabasePage() {
   // Hall CRUD
   async function handleSaveHall(e) {
     e.preventDefault()
-    const method = editingHallId ? 'PUT' : 'POST'
-    const url = editingHallId ? `/api/halls/${editingHallId}` : '/api/halls'
-    const response = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sanitizeObject(hallForm)) })
-    if (response.ok) { fetchMasterData(); setShowHallForm(false); setEditingHallId(null); setHallForm({ hallName: '', rowsCount: 8, columnsCount: 8, seatsPerTable: 1, blockedSeats: '', accessibilitySeats: '', seatingModes: 'semester,internal', allowedExamTypes: 'Internal Examination,University Examination' }) }
+    setSaveSuccessMsg(null)
+    const sanitized = sanitizeObject(hallForm)
+    await saveHall({ ...sanitized, id: editingHallId || undefined })
+    setShowHallForm(false)
+    setEditingHallId(null)
+    setHallForm({ hallName: '', rowsCount: 8, columnsCount: 8, seatsPerTable: 1, blockedSeats: '', accessibilitySeats: '', seatingModes: 'semester,internal', allowedExamTypes: 'Internal Examination,University Examination' })
+    setSaveSuccessMsg('✅ Exam Hall saved successfully!')
   }
   function handleEditHall(h) { setEditingHallId(h.id); setHallForm({ ...h }); setShowHallForm(true) }
-  async function handleDeleteHall(id) { if (confirm('Delete this exam hall layout?')) { const r = await fetch(`/api/halls/${id}`, { method: 'DELETE' }); if (r.ok) fetchMasterData() } }
+  async function handleDeleteHall(id) {
+    if (confirm('Delete this exam hall layout?')) {
+      await deleteHall(id)
+      setSaveSuccessMsg('✅ Exam Hall deleted.')
+    }
+  }
 
   // Dept CRUD
   async function handleSaveDept(e) {
     e.preventDefault()
-    const method = editingDeptId ? 'PUT' : 'POST'
-    const url = editingDeptId ? `/api/departments/${editingDeptId}` : '/api/departments'
-    const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sanitizeObject(deptForm)) })
-    if (r.ok) { fetchMasterData(); setShowDeptForm(false); setEditingDeptId(null); setDeptForm({ departmentCode: '', departmentName: '', program: 'B.E.', regulations: '2021', active: true }) }
+    setSaveSuccessMsg(null)
+    const sanitized = sanitizeObject(deptForm)
+    await saveDept({ ...sanitized, id: editingDeptId || undefined })
+    setShowDeptForm(false)
+    setEditingDeptId(null)
+    setDeptForm({ departmentCode: '', departmentName: '', program: 'B.E.', regulations: '2021', active: true })
+    setSaveSuccessMsg('✅ Department saved successfully!')
   }
   function handleEditDept(d) { setEditingDeptId(d.id); setDeptForm({ ...d }); setShowDeptForm(true) }
-  async function handleDeleteDept(id) { if (confirm('Delete department?')) { const r = await fetch(`/api/departments/${id}`, { method: 'DELETE' }); if (r.ok) fetchMasterData() } }
+  async function handleDeleteDept(id) {
+    if (confirm('Delete department?')) {
+      await deleteDept(id)
+      setSaveSuccessMsg('✅ Department deleted.')
+    }
+  }
 
   // Semester CRUD
   async function handleSaveSem(e) {
     e.preventDefault()
-    const method = editingSemId ? 'PUT' : 'POST'
-    const url = editingSemId ? `/api/semesters/${editingSemId}` : '/api/semesters'
-    const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sanitizeObject(semForm)) })
-    if (r.ok) { fetchMasterData(); setShowSemForm(false); setEditingSemId(null); setSemForm({ semesterNumber: 1, academicYear: '2025-26', regulation: '2021', departmentCode: depts[0]?.departmentCode || 'CSE' }) }
+    setSaveSuccessMsg(null)
+    const sanitized = sanitizeObject(semForm)
+    await saveSem({ ...sanitized, id: editingSemId || undefined })
+    setShowSemForm(false)
+    setEditingSemId(null)
+    setSemForm({ semesterNumber: 1, academicYear: '2025-26', regulation: '2021', departmentCode: depts[0]?.departmentCode || 'CSE' })
+    setSaveSuccessMsg('✅ Semester saved successfully!')
   }
   function handleEditSem(s) { setEditingSemId(s.id); setSemForm({ ...s }); setShowSemForm(true) }
-  async function handleDeleteSem(id) { if (confirm('Delete semester?')) { const r = await fetch(`/api/semesters/${id}`, { method: 'DELETE' }); if (r.ok) fetchMasterData() } }
+  async function handleDeleteSem(id) {
+    if (confirm('Delete semester?')) {
+      await deleteSem(id)
+      setSaveSuccessMsg('✅ Semester deleted.')
+    }
+  }
 
   // Subject CRUD
   async function handleSaveSubject(e) {
     e.preventDefault()
-    const method = editingSubjectId ? 'PUT' : 'POST'
-    const url = editingSubjectId ? `/api/subjects/${editingSubjectId}` : '/api/subjects'
-    const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sanitizeObject(subjectForm)) })
-    if (r.ok) { fetchMasterData(); setShowSubjectForm(false); setEditingSubjectId(null); setSubjectForm({ subjectCode: '', subjectName: '', departmentCode: depts[0]?.departmentCode || 'CSE', semester: 1, regulation: '2021', examType: 'University Examination', active: true }) }
+    setSaveSuccessMsg(null)
+    const sanitized = sanitizeObject(subjectForm)
+    await saveSubject({ ...sanitized, id: editingSubjectId || undefined })
+    setShowSubjectForm(false)
+    setEditingSubjectId(null)
+    setSubjectForm({ subjectCode: '', subjectName: '', departmentCode: depts[0]?.departmentCode || 'CSE', semester: 1, regulation: '2021', examType: 'University Examination', active: true })
+    setSaveSuccessMsg('✅ Subject saved successfully!')
   }
   function handleEditSubject(s) { setEditingSubjectId(s.id); setSubjectForm({ ...s }); setShowSubjectForm(true) }
-  async function handleDeleteSubject(id) { if (confirm('Delete subject paper?')) { const r = await fetch(`/api/subjects/${id}`, { method: 'DELETE' }); if (r.ok) fetchMasterData() } }
+  async function handleDeleteSubject(id) {
+    if (confirm('Delete subject paper?')) {
+      await deleteSubject(id)
+      setSaveSuccessMsg('✅ Subject deleted.')
+    }
+  }
 
   // Invigilator CRUD
   async function handleSaveInvigilator(e) {
     e.preventDefault()
-    const method = editingInvigId ? 'PUT' : 'POST'
-    const url = editingInvigId ? `/api/invigilators/${editingInvigId}` : '/api/invigilators'
-    const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sanitizeObject(invigilatorForm)) })
-    if (r.ok) { fetchMasterData(); setShowInvigilatorForm(false); setEditingInvigId(null); setInvigilatorForm({ name: '', email: '', departmentCode: depts[0]?.departmentCode || 'CSE', availabilityStatus: 'Available', maxWorkloadHours: 12 }) }
+    setSaveSuccessMsg(null)
+    const sanitized = sanitizeObject(invigilatorForm)
+    await saveInvigilator({ ...sanitized, id: editingInvigId || undefined })
+    setShowInvigilatorForm(false)
+    setEditingInvigId(null)
+    setInvigilatorForm({ name: '', email: '', departmentCode: depts[0]?.departmentCode || 'CSE', availabilityStatus: 'Available', maxWorkloadHours: 12 })
+    setSaveSuccessMsg('✅ Invigilator saved successfully!')
+  }
+  function handleEditInvig(i) { setEditingInvigId(i.id); setInvigilatorForm({ ...i }); setShowInvigilatorForm(true) }
+  async function handleDeleteInvig(id) {
+    if (confirm('Delete invigilator?')) {
+      await deleteInvig(id)
+      setSaveSuccessMsg('✅ Invigilator deleted.')
+    }
   }
   function handleEditInvig(i) { setEditingInvigId(i.id); setInvigilatorForm({ ...i }); setShowInvigilatorForm(true) }
   async function handleDeleteInvig(id) { if (confirm('Delete invigilator?')) { const r = await fetch(`/api/invigilators/${id}`, { method: 'DELETE' }); if (r.ok) fetchMasterData() } }

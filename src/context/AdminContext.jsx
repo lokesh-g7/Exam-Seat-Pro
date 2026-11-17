@@ -12,13 +12,49 @@ const DEFAULT_CONFIG = {
   algorithm: 'optimized',
 }
 
+export const DEFAULT_HALLS = [
+  { id: 1, hallName: 'Hall A (Main Block)', rowsCount: 15, columnsCount: 10, seatsPerTable: 1, blockedSeats: '', accessibilitySeats: '0-0,0-1', seatingModes: 'semester,internal', allowedExamTypes: 'Internal Examination,University Examination', active: true },
+  { id: 2, hallName: 'Hall B (East Wing)', rowsCount: 12, columnsCount: 10, seatsPerTable: 1, blockedSeats: '', accessibilitySeats: '0-0,0-1', seatingModes: 'semester,internal', allowedExamTypes: 'Internal Examination,University Examination', active: true },
+  { id: 3, hallName: 'Hall C (Lab Block)', rowsCount: 10, columnsCount: 8, seatsPerTable: 2, blockedSeats: '', accessibilitySeats: '0-0', seatingModes: 'internal', allowedExamTypes: 'Internal Examination', active: true },
+  { id: 4, hallName: 'Hall D (West Wing)', rowsCount: 10, columnsCount: 8, seatsPerTable: 1, blockedSeats: '', accessibilitySeats: '', seatingModes: 'semester', allowedExamTypes: 'University Examination', active: true }
+]
+
+export const DEFAULT_DEPTS = [
+  { id: 1, departmentCode: 'CSE', departmentName: 'Computer Science and Engineering', program: 'B.E.', regulations: '2021', active: true },
+  { id: 2, departmentCode: 'ECE', departmentName: 'Electronics and Communication', program: 'B.E.', regulations: '2021', active: true },
+  { id: 3, departmentCode: 'EEE', departmentName: 'Electrical and Electronics', program: 'B.E.', regulations: '2021', active: true },
+  { id: 4, departmentCode: 'IT', departmentName: 'Information Technology', program: 'B.Tech', regulations: '2021', active: true },
+  { id: 5, departmentCode: 'CSBS', departmentName: 'Computer Science and Business Systems', program: 'B.Tech', regulations: '2021', active: true }
+]
+
+export const DEFAULT_SEMESTERS = [
+  { id: 1, semesterNumber: 1, academicYear: '2025-26', regulation: '2021', departmentCode: 'CSE' },
+  { id: 2, semesterNumber: 3, academicYear: '2025-26', regulation: '2021', departmentCode: 'CSE' },
+  { id: 3, semesterNumber: 5, academicYear: '2025-26', regulation: '2021', departmentCode: 'CSE' },
+  { id: 4, semesterNumber: 3, academicYear: '2025-26', regulation: '2021', departmentCode: 'CSBS' },
+  { id: 5, semesterNumber: 5, academicYear: '2025-26', regulation: '2021', departmentCode: 'ECE' }
+]
+
+export const DEFAULT_SUBJECTS = [
+  { id: 1, subjectCode: 'CS3001', subjectName: 'Artificial Intelligence', departmentCode: 'CSE', semester: 3, regulation: '2021', examType: 'University Examination', active: true },
+  { id: 2, subjectCode: 'CS3002', subjectName: 'Database Management Systems', departmentCode: 'CSE', semester: 3, regulation: '2021', examType: 'University Examination', active: true },
+  { id: 3, subjectCode: 'CS3003', subjectName: 'Computer Networks', departmentCode: 'CSE', semester: 3, regulation: '2021', examType: 'University Examination', active: true },
+  { id: 4, subjectCode: 'CB3001', subjectName: 'Design Thinking & Innovation', departmentCode: 'CSBS', semester: 3, regulation: '2021', examType: 'University Examination', active: true },
+  { id: 5, subjectCode: 'EC3001', subjectName: 'Digital Signal Processing', departmentCode: 'ECE', semester: 3, regulation: '2021', examType: 'University Examination', active: true },
+  { id: 6, subjectCode: 'EC3002', subjectName: 'Microcontrollers', departmentCode: 'ECE', semester: 3, regulation: '2021', examType: 'University Examination', active: true }
+]
+
+export const DEFAULT_INVIGILATORS = [
+  { id: 1, name: 'Dr. Sarah Connor', email: 'sarah@college.edu', departmentCode: 'CSE', availabilityStatus: 'Available', maxWorkloadHours: 12 },
+  { id: 2, name: 'Prof. Charles Xavier', email: 'xavier@college.edu', departmentCode: 'ECE', availabilityStatus: 'Available', maxWorkloadHours: 12 },
+  { id: 3, name: 'Dr. Bruce Banner', email: 'banner@college.edu', departmentCode: 'EEE', availabilityStatus: 'Available', maxWorkloadHours: 8 }
+]
+
 function loadFromStorage() {
   try {
-    // Try new format first
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) return JSON.parse(raw)
     
-    // Try legacy format migration
     const legacy = localStorage.getItem(LEGACY_KEY)
     if (legacy) {
       const data = JSON.parse(legacy)
@@ -32,6 +68,11 @@ function loadFromStorage() {
         },
         seating: data.halls || [],
         currentStep: 0,
+        halls: DEFAULT_HALLS,
+        depts: DEFAULT_DEPTS,
+        semesters: DEFAULT_SEMESTERS,
+        subjects: DEFAULT_SUBJECTS,
+        invigilators: DEFAULT_INVIGILATORS
       }
     }
   } catch { /* ignore */ }
@@ -41,6 +82,7 @@ function loadFromStorage() {
 function saveToStorage(data) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+    localStorage.setItem('examseat_pro_admin_state', JSON.stringify(data))
   } catch { /* ignore */ }
 }
 
@@ -55,6 +97,13 @@ export function AdminProvider({ children }) {
   const [generationProgress, setGenerationProgress] = useState(0)
   const [optimizationStats, setOptimizationStats] = useState(null)
   const [capacityError, setCapacityError] = useState(null)
+
+  // Master Data State
+  const [halls, setHalls] = useState(DEFAULT_HALLS)
+  const [depts, setDepts] = useState(DEFAULT_DEPTS)
+  const [semesters, setSemesters] = useState(DEFAULT_SEMESTERS)
+  const [subjects, setSubjects] = useState(DEFAULT_SUBJECTS)
+  const [invigilators, setInvigilators] = useState(DEFAULT_INVIGILATORS)
   
   // Web Worker ref
   const workerRef = useRef(null)
@@ -69,9 +118,14 @@ export function AdminProvider({ children }) {
       setConfig(saved.config || DEFAULT_CONFIG)
       setSeating(saved.seating || [])
       setCurrentStep(saved.currentStep || 0)
+      if (saved.halls && saved.halls.length > 0) setHalls(saved.halls)
+      if (saved.depts && saved.depts.length > 0) setDepts(saved.depts)
+      if (saved.semesters && saved.semesters.length > 0) setSemesters(saved.semesters)
+      if (saved.subjects && saved.subjects.length > 0) setSubjects(saved.subjects)
+      if (saved.invigilators && saved.invigilators.length > 0) setInvigilators(saved.invigilators)
     }
 
-    // Also fetch latest timetable & students from backend
+    // Try fetching from backend if live
     fetch('/api/timetable')
       .then(res => res.ok ? res.json() : [])
       .then(data => {
@@ -89,12 +143,37 @@ export function AdminProvider({ children }) {
         }
       })
       .catch(() => {})
+
+    fetch('/api/halls')
+      .then(res => res.ok ? res.json() : [])
+      .then(data => { if (Array.isArray(data) && data.length > 0) setHalls(data) })
+      .catch(() => {})
+
+    fetch('/api/departments')
+      .then(res => res.ok ? res.json() : [])
+      .then(data => { if (Array.isArray(data) && data.length > 0) setDepts(data) })
+      .catch(() => {})
+
+    fetch('/api/semesters')
+      .then(res => res.ok ? res.json() : [])
+      .then(data => { if (Array.isArray(data) && data.length > 0) setSemesters(data) })
+      .catch(() => {})
+
+    fetch('/api/subjects')
+      .then(res => res.ok ? res.json() : [])
+      .then(data => { if (Array.isArray(data) && data.length > 0) setSubjects(data) })
+      .catch(() => {})
+
+    fetch('/api/invigilators')
+      .then(res => res.ok ? res.json() : [])
+      .then(data => { if (Array.isArray(data) && data.length > 0) setInvigilators(data) })
+      .catch(() => {})
   }, [])
 
   // Persist on change
   useEffect(() => {
-    saveToStorage({ students, timetable, config, seating, currentStep })
-  }, [students, timetable, config, seating, currentStep])
+    saveToStorage({ students, timetable, config, seating, currentStep, halls, depts, semesters, subjects, invigilators })
+  }, [students, timetable, config, seating, currentStep, halls, depts, semesters, subjects, invigilators])
 
   // Initialize Web Worker
   useEffect(() => {
@@ -240,19 +319,16 @@ export function AdminProvider({ children }) {
         return
       }
       
-      let backendHalls = []
-      try {
-        const hallsRes = await fetch('/api/halls')
-        if (hallsRes.ok) backendHalls = await hallsRes.json()
-      } catch (err) {
-        console.warn("Failed to fetch custom database halls:", err)
-      }
+      // Use configured active halls from state, or fallback to default halls
+      const activeHalls = (halls && halls.length > 0)
+        ? halls.filter(h => h.active !== false)
+        : DEFAULT_HALLS
 
       setCapacityError(null)
       const res = await runWorkerTask('generate', {
         students: validStudents,
         config,
-        halls: backendHalls
+        halls: activeHalls
       })
       
       if (res.error) {
@@ -289,15 +365,11 @@ export function AdminProvider({ children }) {
     const validStudents = studentPool.filter(s => s && (s.id || s.regNo))
     if (validStudents.length === 0) { setIsGenerating(false); return }
     
-    let backendHalls = []
-    try {
-      const hallsRes = await fetch('/api/halls')
-      if (hallsRes.ok) backendHalls = await hallsRes.json()
-    } catch (err) {
-      console.warn("Failed to fetch custom database halls:", err)
-    }
+    const activeHalls = (halls && halls.length > 0)
+      ? halls.filter(h => h.active !== false)
+      : DEFAULT_HALLS
 
-    runWorkerTask('regenerate', { students: validStudents, config, halls: backendHalls }).then((res) => {
+    runWorkerTask('regenerate', { students: validStudents, config, halls: activeHalls }).then((res) => {
       if (res.error) {
         console.error('Regeneration error:', res.error)
         setCapacityError(res.error)
@@ -492,6 +564,122 @@ export function AdminProvider({ children }) {
     }
   }, [currentStep, students.length, timetable.length, seating.length])
 
+  // ─── Master Data CRUD Operations (with immediate state & localStorage persistence) ───
+  const saveHall = useCallback(async (hallData) => {
+    const isEdit = Boolean(hallData.id)
+    const id = hallData.id || Date.now()
+    const item = { ...hallData, id }
+    setHalls(prev => {
+      const exists = prev.some(h => h.id === id)
+      return exists ? prev.map(h => h.id === id ? item : h) : [...prev, item]
+    })
+    try {
+      const method = isEdit ? 'PUT' : 'POST'
+      const url = isEdit ? `/api/halls/${id}` : '/api/halls'
+      fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) }).catch(() => {})
+    } catch {}
+    return item
+  }, [])
+
+  const deleteHall = useCallback(async (id) => {
+    setHalls(prev => prev.filter(h => h.id !== id))
+    try {
+      fetch(`/api/halls/${id}`, { method: 'DELETE' }).catch(() => {})
+    } catch {}
+  }, [])
+
+  const saveDept = useCallback(async (deptData) => {
+    const isEdit = Boolean(deptData.id)
+    const id = deptData.id || Date.now()
+    const item = { ...deptData, id }
+    setDepts(prev => {
+      const exists = prev.some(d => d.id === id)
+      return exists ? prev.map(d => d.id === id ? item : d) : [...prev, item]
+    })
+    try {
+      const method = isEdit ? 'PUT' : 'POST'
+      const url = isEdit ? `/api/departments/${id}` : '/api/departments'
+      fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) }).catch(() => {})
+    } catch {}
+    return item
+  }, [])
+
+  const deleteDept = useCallback(async (id) => {
+    setDepts(prev => prev.filter(d => d.id !== id))
+    try {
+      fetch(`/api/departments/${id}`, { method: 'DELETE' }).catch(() => {})
+    } catch {}
+  }, [])
+
+  const saveSem = useCallback(async (semData) => {
+    const isEdit = Boolean(semData.id)
+    const id = semData.id || Date.now()
+    const item = { ...semData, id }
+    setSemesters(prev => {
+      const exists = prev.some(s => s.id === id)
+      return exists ? prev.map(s => s.id === id ? item : s) : [...prev, item]
+    })
+    try {
+      const method = isEdit ? 'PUT' : 'POST'
+      const url = isEdit ? `/api/semesters/${id}` : '/api/semesters'
+      fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) }).catch(() => {})
+    } catch {}
+    return item
+  }, [])
+
+  const deleteSem = useCallback(async (id) => {
+    setSemesters(prev => prev.filter(s => s.id !== id))
+    try {
+      fetch(`/api/semesters/${id}`, { method: 'DELETE' }).catch(() => {})
+    } catch {}
+  }, [])
+
+  const saveSubject = useCallback(async (subData) => {
+    const isEdit = Boolean(subData.id)
+    const id = subData.id || Date.now()
+    const item = { ...subData, id }
+    setSubjects(prev => {
+      const exists = prev.some(s => s.id === id || s.subjectCode === subData.subjectCode)
+      return exists ? prev.map(s => (s.id === id || s.subjectCode === subData.subjectCode) ? item : s) : [...prev, item]
+    })
+    try {
+      const method = isEdit ? 'PUT' : 'POST'
+      const url = isEdit ? `/api/subjects/${id}` : '/api/subjects'
+      fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) }).catch(() => {})
+    } catch {}
+    return item
+  }, [])
+
+  const deleteSubject = useCallback(async (id) => {
+    setSubjects(prev => prev.filter(s => s.id !== id))
+    try {
+      fetch(`/api/subjects/${id}`, { method: 'DELETE' }).catch(() => {})
+    } catch {}
+  }, [])
+
+  const saveInvigilator = useCallback(async (invData) => {
+    const isEdit = Boolean(invData.id)
+    const id = invData.id || Date.now()
+    const item = { ...invData, id }
+    setInvigilators(prev => {
+      const exists = prev.some(i => i.id === id)
+      return exists ? prev.map(i => i.id === id ? item : i) : [...prev, item]
+    })
+    try {
+      const method = isEdit ? 'PUT' : 'POST'
+      const url = isEdit ? `/api/invigilators/${id}` : '/api/invigilators'
+      fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item) }).catch(() => {})
+    } catch {}
+    return item
+  }, [])
+
+  const deleteInvig = useCallback(async (id) => {
+    setInvigilators(prev => prev.filter(i => i.id !== id))
+    try {
+      fetch(`/api/invigilators/${id}`, { method: 'DELETE' }).catch(() => {})
+    } catch {}
+  }, [])
+
   const value = {
     students,
     setStudents,
@@ -531,6 +719,27 @@ export function AdminProvider({ children }) {
     prevStep,
     canProceed,
     flattenHalls,
+    // Master Data
+    halls,
+    setHalls,
+    saveHall,
+    deleteHall,
+    depts,
+    setDepts,
+    saveDept,
+    deleteDept,
+    semesters,
+    setSemesters,
+    saveSem,
+    deleteSem,
+    subjects,
+    setSubjects,
+    saveSubject,
+    deleteSubject,
+    invigilators,
+    setInvigilators,
+    saveInvigilator,
+    deleteInvig,
   }
 
   return (

@@ -29,7 +29,7 @@ export default function HallGrid({ grid, hallIndex, examMode, searchTerm, highli
 
   if (!isGridArray || actualRows === 0) return null
 
-  const seatedCount = isGridArray ? grid.flat().filter(Boolean).length : 0
+  const seatedCount = isGridArray ? (typeof grid.flat === 'function' ? grid.flat() : [].concat(...grid)).filter(Boolean).length : 0
 
   return (
     <div className="glass-card p-6 border-white/5 animate-in">
@@ -124,7 +124,7 @@ export default function HallGrid({ grid, hallIndex, examMode, searchTerm, highli
 
        {/* Legend */}
        <div className="mt-8 flex flex-wrap gap-2 pt-6 border-t border-white/5">
-        {[...new Set(isGridArray ? grid.flat().filter(Boolean).map(s => s?.dept).filter(Boolean) : [])].map(dept => {
+        {[...new Set(isGridArray ? (typeof grid.flat === 'function' ? grid.flat() : [].concat(...grid)).filter(Boolean).map(s => s?.dept).filter(Boolean) : [])].map(dept => {
           const c = getDeptColor(dept)
           return (
             <div key={dept} className="flex items-center gap-2 px-2 py-1 bg-white/5 rounded-lg border border-white/5">

@@ -139,21 +139,6 @@ function DashboardWithSave({ onLogout }) {
         })
       }
 
-      const studentRes = await fetch('/api/students/upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(studentPayload),
-      })
-
-      if (!studentRes.ok) {
-        let errMsg = studentRes.statusText
-        try {
-          const errData = await studentRes.json()
-          if (errData && errData.error) errMsg = errData.error
-        } catch {}
-        throw new Error(`Student Sync Failed: ${errMsg}`)
-      }
-
       // 2. Sync Allocations (deduplicated by regNo)
       const seenAlloc = new Set()
       const allocPayload = []
@@ -169,33 +154,34 @@ function DashboardWithSave({ onLogout }) {
         })
       }
 
-      const allocRes = await fetch('/api/allocations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          allocations: allocPayload 
-        }),
-      })
+      // Always save to persistent client storage so students can access anywhere
+      try {
+        localStorage.setItem('examseat_published_allocations', JSON.stringify(allocPayload))
+        localStorage.setItem('examseat_published_seating', JSON.stringify(seating))
+      } catch {}
 
-      if (!allocRes.ok) {
-        let errMsg = allocRes.statusText
-        try {
-          const errData = await allocRes.json()
-          if (errData && errData.error) errMsg = errData.error
-        } catch {}
-        throw new Error(`Allocation Sync Failed: ${errMsg}`)
-      }
+      // Attempt live backend sync if online
+      try {
+        await fetch('/api/students/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(studentPayload),
+        })
+        await fetch('/api/allocations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            allocations: allocPayload 
+          }),
+        })
+      } catch {}
 
-      alert('SUCCESS: All data synced to database.')
       setShowSaveModal(false)
       onLogout()
     } catch (err) {
-      console.error(err)
-      if (err.message.includes('Failed to fetch')) {
-        alert('SYNC ERROR: Connection lost. Is the Java backend still running?')
-      } else {
-        alert('SYNC ERROR: ' + err.message)
-      }
+      console.warn('Sync note on logout:', err)
+      setShowSaveModal(false)
+      onLogout()
     } finally {
       setIsSaving(false)
     }

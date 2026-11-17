@@ -434,7 +434,7 @@ export default function ExportPage() {
           <div className="space-y-8">
             {seating.map((grid, idx) => {
               if (!Array.isArray(grid) || !Array.isArray(grid[0])) return null
-              const seatCount = grid.flat().filter(Boolean).length
+              const seatCount = (typeof grid.flat === 'function' ? grid.flat() : [].concat(...grid)).filter(Boolean).length
               const conflicts = calculateConflicts(grid, config.mode)
               return (
                 <div key={idx} className="bg-white/[0.02] border border-white/10 rounded-xl overflow-hidden">
