@@ -39,7 +39,7 @@ public class TesseractOcrService {
     }
 
     private synchronized void initTesseractPath() {
-        if (resolvedTesseractPath != null) return;
+        if (resolvedTesseractPath != null && Boolean.TRUE.equals(tesseractAvailable)) return;
 
         // 1. Check environment variable
         String envCmd = System.getenv("TESSERACT_CMD");
@@ -53,7 +53,23 @@ public class TesseractOcrService {
             }
         }
 
-        // 2. Standard Program Files
+        // 2. Linux / Docker / Cloud paths (Render, Ubuntu, Debian, Alpine)
+        String[] linuxCandidates = {
+            "/usr/bin/tesseract",
+            "/usr/local/bin/tesseract",
+            "/opt/homebrew/bin/tesseract"
+        };
+        for (String candidate : linuxCandidates) {
+            File f = new File(candidate);
+            if (f.exists() && f.isFile() && f.canExecute()) {
+                resolvedTesseractPath = f.getAbsolutePath();
+                tesseractAvailable = true;
+                log.info("Tesseract found at Linux/Cloud path: {}", resolvedTesseractPath);
+                return;
+            }
+        }
+
+        // 3. Windows Standard Program Files
         File pf64 = new File("C:\\Program Files\\Tesseract-OCR\\tesseract.exe");
         if (pf64.exists() && pf64.isFile()) {
             resolvedTesseractPath = pf64.getAbsolutePath();
@@ -62,7 +78,7 @@ public class TesseractOcrService {
             return;
         }
 
-        // 3. Standard Program Files (x86)
+        // 4. Windows Standard Program Files (x86)
         File pf86 = new File("C:\\Program Files (x86)\\Tesseract-OCR\\tesseract.exe");
         if (pf86.exists() && pf86.isFile()) {
             resolvedTesseractPath = pf86.getAbsolutePath();
@@ -71,7 +87,39 @@ public class TesseractOcrService {
             return;
         }
 
-        // 4. Try PATH
+        // 5. Test direct execution on system PATH (cross-platform: Linux, Mac, Windows)
+        try {
+            Process process = new ProcessBuilder("tesseract", "--version").start();
+            int exitCode = process.waitFor();
+            if (exitCode == 0) {
+                resolvedTesseractPath = "tesseract";
+                tesseractAvailable = true;
+                log.info("Tesseract verified via direct system PATH invocation ('tesseract --version')");
+                return;
+            }
+        } catch (Exception ignored) {
+        }
+
+        // 6. Try Linux/Mac 'which tesseract'
+        try {
+            Process process = new ProcessBuilder("which", "tesseract").start();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line = reader.readLine();
+                if (line != null && !line.isBlank()) {
+                    File f = new File(line.trim());
+                    if (f.exists() && f.isFile()) {
+                        resolvedTesseractPath = f.getAbsolutePath();
+                        tesseractAvailable = true;
+                        log.info("Tesseract found via 'which tesseract': {}", resolvedTesseractPath);
+                        return;
+                    }
+                }
+            }
+            process.waitFor();
+        } catch (Exception ignored) {
+        }
+
+        // 7. Try Windows 'where tesseract'
         try {
             Process process = new ProcessBuilder("where", "tesseract").start();
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
@@ -81,7 +129,7 @@ public class TesseractOcrService {
                     if (f.exists() && f.isFile()) {
                         resolvedTesseractPath = f.getAbsolutePath();
                         tesseractAvailable = true;
-                        log.info("Tesseract found on PATH: {}", resolvedTesseractPath);
+                        log.info("Tesseract found on Windows PATH: {}", resolvedTesseractPath);
                         return;
                     }
                 }
